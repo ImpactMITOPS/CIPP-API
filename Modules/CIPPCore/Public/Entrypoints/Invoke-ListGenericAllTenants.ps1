@@ -18,6 +18,8 @@ Function Invoke-ListGenericAllTenants {
     $RawGraphRequest = Get-Tenants | ForEach-Object -Parallel { 
         $domainName = $_.defaultDomainName
         Import-Module '.\GraphHelper.psm1'
+        Import-Module '.\Modules\AzBobbyTables'
+        Import-Module '.\Modules\CIPPCore'
         try {
             Write-Host $using:fullUrl
             New-GraphGetRequest -uri $using:fullUrl -tenantid $_.defaultDomainName -ComplexFilter -ErrorAction Stop | Select-Object *, @{l = 'Tenant'; e = { $domainName } }, @{l = 'CippStatus'; e = { 'Good' } }
