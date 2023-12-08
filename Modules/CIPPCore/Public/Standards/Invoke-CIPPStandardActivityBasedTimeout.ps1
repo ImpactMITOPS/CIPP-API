@@ -1,12 +1,13 @@
-function Invoke-ActivityBasedTimeout {
+function Invoke-CIPPStandardActivityBasedTimeout {
     <#
     .FUNCTIONALITY
     Internal
     #>
     param($Tenant, $Settings)
+    $State = (New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/activityBasedTimeoutPolicies' -tenantid $tenant).id
+
     If ($Settings.Remediate) {
         try {
-            $State = (New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/policies/activityBasedTimeoutPolicies' -tenantid $tenant).id
             if (!$State) {
                 $body = @'
 {
@@ -22,5 +23,18 @@ function Invoke-ActivityBasedTimeout {
             Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to enable Activity Based Timeout $($_.exception.message)" -sev Error
         }
     }
+
+    if ($Settings.Alert) {
+        if ($State) {
+            Write-LogMessage -API 'Standards' -tenant $tenant -message 'Activity Based Timeout is enabled' -sev Info
+        } else {
+            Write-LogMessage -API 'Standards' -tenant $tenant -message 'Activity Based Timeout is not enabled' -sev Alert
+        }
+    }
+
+    if ($Settings.Report) {
+        Add-CIPPBPAField -FieldName 'ActivityBasedTimeout' -FieldValue [bool]$state -StoreAs bool -Tenant $tenant
+    }
+
 }
 

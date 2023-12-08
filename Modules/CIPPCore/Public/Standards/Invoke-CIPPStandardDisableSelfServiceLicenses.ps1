@@ -1,17 +1,10 @@
-function Invoke-DisableSelfServiceLicenses {
+function Invoke-CIPPStandardDisableSelfServiceLicenses {
     <#
     .FUNCTIONALITY
     Internal
     #>
-    param($Tenant, $Settings)
-    If ($Settings.Remediate) {
-        
+    param($Tenant, $Settings) 
 
-    try {
-        Write-LogMessage "Standards API: $($Tenant, $Settings) failed to disable License Buy Self Service: $($exception.message)" -sev Error
+    Write-LogMessage -API 'Standards' -tenant $tenant -message 'Self Service Licenses cannot be disabled' -sev Error
 
-    } catch {
-        Write-LogMessage "Standards API: $($Tenant, $Settings) failed to disable License Buy Self Service: $($exception.message)" -sev Error
-    }
-}
 }

@@ -1,4 +1,4 @@
-function Invoke-fwdAdminAlerts {
+function Invoke-CIPPStandardfwdAdminAlerts {
     <#
     .FUNCTIONALITY
     Internal
@@ -6,6 +6,6 @@ function Invoke-fwdAdminAlerts {
     param($Tenant, $Settings)
     If ($Settings.Remediate) {
         
-    #This isn't done yet.
-}
+        #This isn't done yet.
+    }
 }
