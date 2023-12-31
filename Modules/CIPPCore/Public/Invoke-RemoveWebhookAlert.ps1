@@ -29,14 +29,14 @@ Function Invoke-RemoveWebhookAlert {
                     RowKey       = 'AllTenantsWebhookCreation'
                     PartitionKey = 'webhookcreation'
                 }
-                RemoveAzDataTableEntity @Table -Entity $CompleteObject -ErrorAction SilentlyContinue | Out-Null
+                Remove-AzDataTableEntity @Table -Entity $CompleteObject -ErrorAction SilentlyContinue | Out-Null
                 
             } else {
                 $Tenants = $Request.query.TenantFilter
             }
     
             $Results = foreach ($Tenant in $Tenants) {
-                Remove-CIPPGraphSubscription -TenantFilter $Tenant -CIPPID $Request.query.CIPPID
+                Remove-CIPPGraphSubscription -TenantFilter $Tenant -Type 'AuditLog'
                 $Entity = $WebhookRow | Where-Object -Property RowKey -EQ $Request.query.ID
                 Remove-AzDataTableEntity @WebhookTable -Entity $Entity | Out-Null
                 "Removed Alert Rule for $($Request.query.TenantFilter)"
