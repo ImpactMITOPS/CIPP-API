@@ -82,15 +82,13 @@ function Push-ExecScheduledCommand {
         if ($task.Recurrence -match '^\d+$') {
             $task.Recurrence = $task.Recurrence + 'd'
         }
-        $now = Get-Date
-        $nextRun = switch -Regex ($task.Recurrence) {
-            '(\d+)m$' { $now.AddMinutes($matches[1]) }
-            '(\d+)h$' { $now.AddHours($matches[1]) }
-            '(\d+)d$' { $now.AddDays($matches[1]) }
+        $secondsToAdd = switch -Regex ($task.Recurrence) {
+            '(\d+)m$' { [int64]$matches[1] * 60 }
+            '(\d+)h$' { [int64]$matches[1] * 3600 }
+            '(\d+)d$' { [int64]$matches[1] * 86400 }
             default { throw "Unsupported recurrence format: $($task.Recurrence)" }
         }
-        # Convert next run time to Unix timestamp, but decrease it by 2 minutes to prevent it from running late, due to the avg time it takes to execute the task.
-        $nextRunUnixTime = [int64]($nextRun - (Get-Date '1/1/1970')).TotalSeconds - 120
+        $nextRunUnixTime = [int64]$task.ScheduledTime + [int64]$secondsToAdd
         Write-Host "The job is recurring and should occur again at: $nextRunUnixTime"
         Update-AzDataTableEntity @Table -Entity @{
             PartitionKey  = $task.PartitionKey
