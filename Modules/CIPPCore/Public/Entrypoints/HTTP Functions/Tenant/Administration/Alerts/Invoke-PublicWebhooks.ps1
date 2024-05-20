@@ -85,6 +85,7 @@ function Invoke-PublicWebhooks {
                             Write-Host 'No tenants found for this webhook, probably an old entry. Skipping.'
                             continue
                         }
+                        Write-Host "Webhook: The received content-type for $($TenantFilter) is $($ReceivedItem.ContentType)"
                         if ($ReceivedItem.ContentType -in $Configuration.LogType) {
                             $Data = New-GraphPostRequest -type GET -uri "https://manage.office.com/api/v1.0/$($ReceivedItem.tenantId)/activity/feed/audit/$($ReceivedItem.contentid)" -tenantid $TenantFilter -scope 'https://manage.office.com/.default'
                         } else {
@@ -93,7 +94,7 @@ function Invoke-PublicWebhooks {
                         }
 
 
-                        $PreProccessedData = $Data | Select-Object *, CIPPGeoLocation, CIPPBadRepIP, CIPPHostedIP, CIPPIPDetected, CIPPLocationInfo, CIPPExtendedProperties, CIPPDeviceProperties, CIPPParameters, CIPPModifiedProperties -ErrorAction SilentlyContinue
+                        $PreProccessedData = $Data | Select-Object *, CIPPAction, CIPPClause, CIPPGeoLocation, CIPPBadRepIP, CIPPHostedIP, CIPPIPDetected, CIPPLocationInfo, CIPPExtendedProperties, CIPPDeviceProperties, CIPPParameters, CIPPModifiedProperties -ErrorAction SilentlyContinue
                         $LocationTable = Get-CIPPTable -TableName 'knownlocationdb'
                         $ProcessedData = foreach ($Data in $PreProccessedData) {
                             if ($Data.ExtendedProperties) {
@@ -190,15 +191,18 @@ function Invoke-PublicWebhooks {
                         $DataToProcess = foreach ($clause in $Where) {
                             Write-Host "Webhook: Processing clause: $($clause.clause)"
                             Write-Host "Webhook: If this clause would be true, the action would be: $($clause.expectedAction)"
-                            $ReturnedData = $ProcessedData | Where-Object { Invoke-Expression $clause.clause } | Select-Object *, CIPPAction, CIPPClause -ErrorAction SilentlyContinue
+                            $ReturnedData = $ProcessedData | Where-Object { Invoke-Expression $clause.clause }
                             if ($ReturnedData) {
-                                $ReturnedData.CIPPAction = $clause.expectedAction
-                                $ReturnedData.CIPPClause = ($clause.clause | ForEach-Object { "When $($_.Property.label) is $($_.Operator.label) $($_.input.value)" }) -join ' and '
+                                $ReturnedData = foreach ($item in $ReturnedData) {
+                                    $item.CIPPAction = $clause.expectedAction
+                                    $item.CIPPClause = ($clause.clause | ForEach-Object { "When $($_.Property.label) is $($_.Operator.label) $($_.input.value)" }) -join ' and '
+                                    $item
+                                }
                             }
                             $ReturnedData
                         }
 
-                        Write-Host "Data to process found: $($DataToProcess.count) items"
+                        Write-Host "Webhook: Data to process found: $($DataToProcess.count) items"
                         foreach ($Item in $DataToProcess) {
                             Write-Host "Processing $($item.operation)"
                             ## Push webhook data to table
