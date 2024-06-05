@@ -15,7 +15,7 @@ Function Invoke-ExecJITAdmin {
 
     if ($Request.Query.Action -eq 'List') {
         $Schema = Get-CIPPSchemaExtensions | Where-Object { $_.id -match '_cippUser' }
-        Write-Information "Schema: $($Schema)"
+        #Write-Information "Schema: $($Schema)"
         $Query = @{
             TenantFilter = $Request.Query.TenantFilter
             Endpoint     = 'users'
@@ -26,8 +26,18 @@ Function Invoke-ExecJITAdmin {
             }
         }
         $Users = Get-GraphRequestList @Query | Where-Object { $_.id }
+        $BulkRequests = $Users | ForEach-Object { @(
+                @{
+                    id     = $_.id
+                    method = 'GET'
+                    url    = "users/$($_.id)/memberOf/microsoft.graph.directoryRole/?`$select=id,displayName"
+                }
+            )
+        }
+        $RoleResults = New-GraphBulkRequest -tenantid $Request.Query.TenantFilter -Requests @($BulkRequests)
+        #Write-Information ($RoleResults | ConvertTo-Json -Depth 10 )
         $Results = $Users | ForEach-Object {
-            $MemberOf = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/users/$($_.id)/memberOf/microsoft.graph.directoryRole/?`$select=id,displayName" -tenantid $Request.Query.TenantFilter -ComplexFilter
+            $MemberOf = ($RoleResults | Where-Object -Property id -EQ $_.id).body.value | Select-Object displayName, id
             [PSCustomObject]@{
                 id                 = $_.id
                 displayName        = $_.displayName
@@ -38,8 +48,7 @@ Function Invoke-ExecJITAdmin {
             }
         }
 
-
-        Write-Information ($Results | ConvertTo-Json -Depth 10)
+        #Write-Information ($Results | ConvertTo-Json -Depth 10)
         $Body = @{
             Results  = @($Results)
             Metadata = @{
@@ -47,9 +56,9 @@ Function Invoke-ExecJITAdmin {
             }
         }
     } else {
-        Write-Information ($Request.Body | ConvertTo-Json -Depth 10)
-        if ($Request.body.UserId -match '^[a-f0-9]{8}-([a-f0-9]{4}-){3}[a-f0-9]{12}$') {
-            $Username = (New-GraphGetRequest -uri "https://graph.microsoft.com/v1.0/users/$($Request.body.UserId)" -tenantid $Request.body.TenantFilter).userPrincipalName
+        #Write-Information ($Request.Body | ConvertTo-Json -Depth 10)
+        if ($Request.Body.UserId -match '^[a-f0-9]{8}-([a-f0-9]{4}-){3}[a-f0-9]{12}$') {
+            $Username = (New-GraphGetRequest -uri "https://graph.microsoft.com/v1.0/users/$($Request.Body.UserId)" -tenantid $Request.Body.TenantFilter).userPrincipalName
         }
 
         $Start = ([System.DateTimeOffset]::FromUnixTimeSeconds($Request.Body.StartDate)).DateTime.ToLocalTime()
@@ -59,17 +68,20 @@ Function Invoke-ExecJITAdmin {
         if ($Request.Body.useraction -eq 'create') {
             Write-Information "Creating JIT Admin user $($Request.Body.UserPrincipalName)"
             $JITAdmin = @{
-                User       = @{
+                User         = [PSCustomObject]@{
                     'FirstName'         = $Request.Body.FirstName
                     'LastName'          = $Request.Body.LastName
                     'UserPrincipalName' = $Request.Body.UserPrincipalName
                 }
-                Expiration = $Expiration
-                Action     = 'Create'
+                Expiration   = $Expiration
+                Action       = 'Create'
+                TenantFilter = $Request.Body.TenantFilter
             }
             $CreateResult = Set-CIPPUserJITAdmin @JITAdmin
+            $Username = $CreateResult.userPrincipalName
             $Results.Add("Created User: $($CreateResult.userPrincipalName)")
             $Results.Add("Password: $($CreateResult.password)")
+            Start-Sleep -Seconds 1
         }
         $Parameters = @{
             TenantFilter = $Request.Body.TenantFilter
@@ -81,7 +93,6 @@ Function Invoke-ExecJITAdmin {
             Expiration   = $Expiration
         }
         if ($Start -gt (Get-Date)) {
-            $Results.Add("Scheduling JIT Admin enable task for $Username")
             $TaskBody = @{
                 TenantFilter  = $Request.Body.TenantFilter
                 Name          = "JIT Admin (enable): $Username"
@@ -93,8 +104,8 @@ Function Invoke-ExecJITAdmin {
                 ScheduledTime = $Request.Body.StartDate
             }
             Add-CIPPScheduledTask -Task $TaskBody -hidden $false
-            Set-CIPPUserJITAdminProperties -TenantFilter $Request.Body.TenantFilter -UserId $UserObj.id -Expiration $Expiration
-            $Results.Add("Scheduled JIT Admin enable task for $Username")
+            Set-CIPPUserJITAdminProperties -TenantFilter $Request.Body.TenantFilter -UserId $Request.Body.UserId -Expiration $Expiration
+            $Results.Add("Scheduling JIT Admin enable task for $Username")
         } else {
             $Results.Add("Executing JIT Admin enable task for $Username")
             Set-CIPPUserJITAdmin @Parameters
@@ -102,7 +113,7 @@ Function Invoke-ExecJITAdmin {
 
         $DisableTaskBody = @{
             TenantFilter  = $Request.Body.TenantFilter
-            Name          = "JIT Admin (disable): $($Request.Body.UserPrincipalName)"
+            Name          = "JIT Admin (disable): $Username"
             Command       = @{
                 value = 'Set-CIPPUserJITAdmin'
                 label = 'Set-CIPPUserJITAdmin'
@@ -110,15 +121,20 @@ Function Invoke-ExecJITAdmin {
             Parameters    = @{
                 TenantFilter = $Request.Body.TenantFilter
                 User         = @{
-                    'UserPrincipalName' = $Request.Body.UserPrincipalName
+                    'UserPrincipalName' = $Username
                 }
                 Roles        = $Request.Body.AdminRoles
                 Action       = $Request.Body.ExpireAction
             }
+            PostExecution = @{
+                Webhook = [bool]$Request.Body.PostExecution.Webhook
+                Email   = [bool]$Request.Body.PostExecution.Email
+                PSA     = [bool]$Request.Body.PostExecution.PSA
+            }
             ScheduledTime = $Request.Body.EndDate
         }
         Add-CIPPScheduledTask -Task $DisableTaskBody -hidden $false
-        $Results.Add("Scheduled JIT Admin disable task for $Username")
+        $Results.Add("Scheduling JIT Admin disable task for $Username")
         $Body = @{
             Results = @($Results)
         }
