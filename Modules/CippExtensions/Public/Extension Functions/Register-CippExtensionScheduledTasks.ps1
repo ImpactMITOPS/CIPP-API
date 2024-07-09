@@ -11,6 +11,7 @@ function Register-CIPPExtensionScheduledTasks {
     # Get existing scheduled usertasks
     $ScheduledTasksTable = Get-CIPPTable -TableName ScheduledTasks
     $ScheduledTasks = Get-CIPPAzDataTableEntity @ScheduledTasksTable -Filter 'Hidden eq true' | Where-Object { $_.Command -match 'Sync-CippExtensionData' }
+    $PushTasks = Get-CIPPAzDataTableEntity @ScheduledTasksTable -Filter 'Hidden eq true' | Where-Object { $_.Command -match 'Push-CippExtensionData' }
     $Tenants = Get-Tenants -IncludeErrors
 
     $Extensions = @('Hudu')
@@ -28,6 +29,7 @@ function Register-CIPPExtensionScheduledTasks {
             }
 
             $SyncTypes.Add('Overview')
+            $SyncTypes.Add('Groups')
 
             if ($FieldSync.Users) {
                 $SyncTypes.Add('Users')
@@ -39,7 +41,10 @@ function Register-CIPPExtensionScheduledTasks {
 
             foreach ($Mapping in $Mappings) {
                 $Tenant = $Tenants | Where-Object { $_.customerId -eq $Mapping.RowKey }
-
+                if (!$Tenant) {
+                    Write-Warning "Tenant $($Mapping.RowKey) not found"
+                    continue
+                }
                 foreach ($SyncType in $SyncTypes) {
                     $ExistingTask = $ScheduledTasks | Where-Object { $_.Tenant -eq $Tenant.defaultDomainName -and $_.SyncType -eq $SyncType }
                     if (!$ExistingTask -or $Reschedule.IsPresent) {
@@ -62,10 +67,57 @@ function Register-CIPPExtensionScheduledTasks {
                             $Task.RowKey = $ExistingTask.RowKey
                         }
                         $null = Add-CIPPScheduledTask -Task $Task -hidden $true -SyncType $SyncType
+                        Write-Information "Creating $SyncType task for tenant $($Tenant.defaultDomainName)"
                     }
                 }
+
+                $ExistingPushTask = $PushTasks | Where-Object { $_.Tenant -eq $Tenant.defaultDomainName -and $_.SyncType -eq $Extension }
+                if (!$ExistingPushTask -or $Reschedule.IsPresent) {
+                    # push cached data to extension
+                    $in30mins = [int64](([datetime]::UtcNow.AddMinutes(30)) - (Get-Date '1/1/1970')).TotalSeconds
+                    $Task = @{
+                        Name          = "$Extension Extension Sync"
+                        Command       = @{
+                            value = 'Push-CippExtensionData'
+                            label = 'Push-CippExtensionData'
+                        }
+                        Parameters    = @{
+                            TenantFilter = $Tenant.defaultDomainName
+                            Extension    = $Extension
+                        }
+                        Recurrence    = '1d'
+                        ScheduledTime = $in30mins
+                        TenantFilter  = $Tenant.defaultDomainName
+                    }
+                    if ($ExistingPushTask) {
+                        $Task.RowKey = $ExistingTask.RowKey
+                    }
+                    $null = Add-CIPPScheduledTask -Task $Task -hidden $true -SyncType $Extension
+                    Write-Information "Creating $Extension task for tenant $($Tenant.defaultDomainName)"
+                }
+            }
+        } else {
+            # remove existing scheduled tasks
+            $ScheduledTasks | Where-Object { $_.SyncType -eq $Extension } | ForEach-Object {
+                Write-Information "Extension Disabled: Cleaning up scheduled task $($_.Name) for tenant $($_.Tenant)"
+                $Entity = $_ | Select-Object -Property PartitionKey, RowKey
+                Remove-AzDataTableEntity @ScheduledTasksTable -Entity $Entity
             }
         }
     }
 
+    foreach ($Task in $ScheduledTasks) {
+        if ($Task.Tenant -notin $Tenants.defaultDomainName) {
+            Write-Information "Tenant Removed: Cleaning up scheduled task $($Task.Name) for tenant $($Task.TenantFilter)"
+            $Entity = $Task | Select-Object -Property PartitionKey, RowKey
+            Remove-AzDataTableEntity @ScheduledTasksTable -Entity $Entity
+        }
+    }
+    foreach ($Task in $PushTasks) {
+        if ($Task.Tenant -notin $Tenants.defaultDomainName) {
+            Write-Information "Tenant Removed: Cleaning up scheduled task $($Task.Name) for tenant $($Task.TenantFilter)"
+            $Entity = $Task | Select-Object -Property PartitionKey, RowKey
+            Remove-AzDataTableEntity @ScheduledTasksTable -Entity $Entity
+        }
+    }
 }

@@ -3,10 +3,19 @@ function Add-CIPPScheduledTask {
     param(
         [pscustomobject]$Task,
         [bool]$Hidden,
+        $DisallowDuplicateName = $false,
         [string]$SyncType = $null
     )
 
     $Table = Get-CIPPTable -TableName 'ScheduledTasks'
+    if ($DisallowDuplicateName) {
+        $Filter = "PartitionKey eq 'ScheduledTask' and Name eq '$($Task.Name)'"
+        $ExistingTask = (Get-CIPPAzDataTableEntity @Table -Filter $Filter)
+        if ($ExistingTask) {
+            return "Task with name $($Task.Name) already exists"
+        }
+    }
+
     $propertiesToCheck = @('Webhook', 'Email', 'PSA')
     $PostExecution = ($propertiesToCheck | Where-Object { $task.PostExecution.$_ -eq $true }) -join ','
     $Parameters = [System.Collections.Hashtable]@{}
@@ -35,6 +44,13 @@ function Add-CIPPScheduledTask {
     } else {
         $RowKey = $Task.RowKey
     }
+
+    $Recurrence = if ([string]::IsNullOrEmpty($task.Recurrence.value)) {
+        $task.Recurrence
+    } else {
+        $task.Recurrence.value
+    }
+
     $entity = @{
         PartitionKey         = [string]'ScheduledTask'
         TaskState            = [string]'Planned'
@@ -44,7 +60,7 @@ function Add-CIPPScheduledTask {
         Command              = [string]$task.Command.value
         Parameters           = [string]$Parameters
         ScheduledTime        = [string]$task.ScheduledTime
-        Recurrence           = [string]$task.Recurrence.value
+        Recurrence           = [string]$Recurrence
         PostExecution        = [string]$PostExecution
         AdditionalProperties = [string]$AdditionalProperties
         Hidden               = [bool]$Hidden
