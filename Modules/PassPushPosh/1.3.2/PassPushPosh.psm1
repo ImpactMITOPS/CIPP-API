@@ -64,6 +64,7 @@ $ExportableTypes =@(
 $TypeAcceleratorsClass = [psobject].Assembly.GetType(
     'System.Management.Automation.TypeAccelerators'
 )
+<#
 # Ensure none of the types would clobber an existing type accelerator.
 # If a type accelerator with the same name exists, throw an exception.
 $ExistingTypeAccelerators = $TypeAcceleratorsClass::Get
@@ -81,10 +82,12 @@ foreach ($Type in $ExportableTypes) {
             $Type.FullName
         )
     }
-}
+}#>
 # Add type accelerators for every exportable type.
 foreach ($Type in $ExportableTypes) {
+    try {
     $TypeAcceleratorsClass::Add($Type.FullName, $Type)
+    } catch {}
 }
 # Remove type accelerators when the module is removed.
 ($MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
