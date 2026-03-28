@@ -31,7 +31,7 @@ function Invoke-CIPPDBCacheCollection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('Graph', 'ExchangeConfig', 'ExchangeData', 'ConditionalAccess', 'IdentityProtection', 'Intune')]
+        [ValidateSet('Graph', 'ExchangeConfig', 'ExchangeData', 'ConditionalAccess', 'IdentityProtection', 'Intune', 'Compliance', 'CopilotUsage')]
         [string]$CollectionType,
 
         [Parameter(Mandatory = $true)]
@@ -97,8 +97,6 @@ function Invoke-CIPPDBCacheCollection {
             'MailboxUsage'
             'OneDriveUsage'
             'OfficeActivations'
-            'EmailActivity'
-            'TeamsUserActivity'
         )
         ConditionalAccess  = @(
             'ConditionalAccessPolicies'
@@ -121,6 +119,16 @@ function Invoke-CIPPDBCacheCollection {
             'IntuneAppProtectionPolicies'
             'DetectedApps'
             'MDEOnboarding'
+        )
+        Compliance         = @(
+            'SensitivityLabels'
+            'DlpCompliancePolicies'
+        )
+        CopilotUsage       = @(
+            'CopilotUsageUserDetail'
+            'CopilotUserCountSummary'
+            'CopilotUserCountTrend'
+            'CopilotReadinessActivity'
         )
     }
 
