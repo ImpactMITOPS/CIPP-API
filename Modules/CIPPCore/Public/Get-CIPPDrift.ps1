@@ -33,9 +33,22 @@ function Get-CIPPDrift {
     $ConditionalAccessCapable = Test-CIPPStandardLicense -StandardName 'ConditionalAccessTemplate_general' -TenantFilter $TenantFilter -RequiredCapabilities @('AAD_PREMIUM', 'AAD_PREMIUM_P2')
     $IntuneTable = Get-CippTable -tablename 'templates'
 
+    # Load all templates for tag resolution (mirrors Get-CIPPTenantAlignment)
+    $AllTableTemplates = Get-CIPPAzDataTableEntity @IntuneTable
+    # Build a hashtable indexed by Package for O(1) tag lookup
+    $TemplatesByPackage = @{}
+    foreach ($t in $AllTableTemplates) {
+        if ($t.Package) {
+            if (-not $TemplatesByPackage.ContainsKey($t.Package)) {
+                $TemplatesByPackage[$t.Package] = [System.Collections.Generic.List[object]]::new()
+            }
+            $TemplatesByPackage[$t.Package].Add($t)
+        }
+    }
+
     # Always load templates for display name resolution, even if tenant doesn't have licenses
     $IntuneFilter = "PartitionKey eq 'IntuneTemplate'"
-    $RawIntuneTemplates = (Get-CIPPAzDataTableEntity @IntuneTable -Filter $IntuneFilter)
+    $RawIntuneTemplates = $AllTableTemplates | Where-Object { $_.PartitionKey -eq 'IntuneTemplate' }
     $AllIntuneTemplates = $RawIntuneTemplates | ForEach-Object {
         try {
             $JSONData = $_.JSON | ConvertFrom-Json -Depth 10 -ErrorAction SilentlyContinue
@@ -51,8 +64,7 @@ function Get-CIPPDrift {
     } | Sort-Object -Property displayName
 
     # Load all CA templates
-    $CAFilter = "PartitionKey eq 'CATemplate'"
-    $RawCATemplates = (Get-CIPPAzDataTableEntity @IntuneTable -Filter $CAFilter)
+    $RawCATemplates = $AllTableTemplates | Where-Object { $_.PartitionKey -eq 'CATemplate' }
     $AllCATemplates = $RawCATemplates | ForEach-Object {
         try {
             $data = $_.JSON | ConvertFrom-Json -Depth 100 -ErrorAction SilentlyContinue
@@ -269,9 +281,15 @@ function Get-CIPPDrift {
                         if ($Template.TemplateList.value) {
                             $IntuneTemplateIds.Add($Template.TemplateList.value)
                         }
-                        if ($Template.'TemplateList-Tags'.rawData.templates) {
-                            foreach ($TagTemplate in $Template.'TemplateList-Tags'.rawData.templates) {
-                                $IntuneTemplateIds.Add($TagTemplate.GUID)
+                        if ($Template.'TemplateList-Tags') {
+                            foreach ($Tag in $Template.'TemplateList-Tags') {
+                                $TagValue = if ($Tag.value) { $Tag.value } else { $Tag }
+                                $ResolvedTagTemplates = if ($TemplatesByPackage.ContainsKey($TagValue)) { $TemplatesByPackage[$TagValue] } else { @() }
+                                foreach ($ResolvedTemplate in $ResolvedTagTemplates) {
+                                    if ($ResolvedTemplate.RowKey -and $ResolvedTemplate.RowKey -notin $IntuneTemplateIds) {
+                                        $IntuneTemplateIds.Add($ResolvedTemplate.RowKey)
+                                    }
+                                }
                             }
                         }
                     }
@@ -380,6 +398,28 @@ function Get-CIPPDrift {
             $AllDeviations.AddRange($StandardsDeviations)
             $AllDeviations.AddRange($PolicyDeviations)
 
+            # Persist newly detected deviations to the tenantDrift table so the summary page can count them
+            $NewDriftEntities = [System.Collections.Generic.List[object]]::new()
+            foreach ($Deviation in $AllDeviations) {
+                if (-not $ExistingDriftStates.ContainsKey($Deviation.standardName)) {
+                    $RowKey = $Deviation.standardName -replace '\.', '_'
+                    $NewDriftEntities.Add(@{
+                        PartitionKey = $TenantFilter
+                        RowKey       = $RowKey
+                        StandardName = $Deviation.standardName
+                        Status       = 'New'
+                        LastModified = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    })
+                }
+            }
+            if ($NewDriftEntities.Count -gt 0) {
+                try {
+                    Add-CIPPAzDataTableEntity @DriftTable -Entity $NewDriftEntities -Force
+                } catch {
+                    Write-Warning "Failed to persist new drift deviations: $($_.Exception.Message)"
+                }
+            }
+
             # Filter deviations by status for counting
             $NewDeviations = $AllDeviations | Where-Object { $_.Status -eq 'New' }
             $AcceptedDeviations = $AllDeviations | Where-Object { $_.Status -eq 'Accepted' }
@@ -399,7 +439,7 @@ function Get-CIPPDrift {
                 deniedDeviationsCount           = $DeniedDeviations.Count
                 customerSpecificDeviationsCount = $CustomerSpecificDeviations.Count
                 newDeviationsCount              = $NewDeviations.Count
-                alignedCount                    = $Alignment.CompliantStandards
+                alignedCount                    = $Alignment.CompliantStandards - $AcceptedDeviations.Count - $CustomerSpecificDeviations.Count
                 currentDeviations               = @($CurrentDeviations)
                 acceptedDeviations              = @($AcceptedDeviations)
                 customerSpecificDeviations      = @($CustomerSpecificDeviations)
