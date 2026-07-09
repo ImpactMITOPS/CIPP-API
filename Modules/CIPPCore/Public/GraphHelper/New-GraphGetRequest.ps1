@@ -25,6 +25,7 @@ function New-GraphGetRequest {
         # (e.g. Set-CIPPDBCache* | Add-CIPPDbItem). Trade-off: on a mid-pagination
         # failure, pages already emitted have flowed downstream before the throw.
         [switch]$Stream,
+        [switch]$UseCertificate,
         $Headers
     )
 
@@ -38,11 +39,10 @@ function New-GraphGetRequest {
         if ($headers) {
             $headers = $Headers
         } else {
-            if ($scope -eq 'ExchangeOnline') {
-                $headers = Get-GraphToken -tenantid $tenantid -scope 'https://outlook.office365.com/.default' -AsApp $asapp -SkipCache $skipTokenCache
-            } else {
-                $headers = Get-GraphToken -tenantid $tenantid -scope $scope -AsApp $asapp -SkipCache $skipTokenCache
-            }
+            $TokenScope = if ($scope -eq 'ExchangeOnline') { 'https://outlook.office365.com/.default' } else { $scope }
+            # -UseCertificate authenticates the app with the SAM certificate instead of the
+            # client secret: delegated (refresh token) by default, app-only with -AsApp $true
+            $headers = Get-GraphToken -tenantid $tenantid -scope $TokenScope -AsApp $asapp -SkipCache $skipTokenCache -UseCertificate:$UseCertificate
         }
         if ($ComplexFilter) {
             $headers['ConsistencyLevel'] = 'eventual'
