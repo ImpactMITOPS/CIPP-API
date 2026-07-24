@@ -116,10 +116,16 @@ function Invoke-CIPPSharePointTemplateDeploy {
                     SiteName        = $SiteTemplate.displayName
                     SiteDescription = ($SiteTemplate.description ?? $SiteTemplate.displayName)
                     SiteOwner       = $SiteOwner
-                    TemplateName    = 'Team'
                     TenantFilter    = $TenantFilter
                     Headers         = $Headers
                     APIName         = $APIName
+                }
+                # Team site vs Communication — createAs may persist {label,value}; default Team.
+                $RawCreateAs = [string]($SiteTemplate.createAs.value ?? $SiteTemplate.createAs)
+                $SiteParams.TemplateName = if ($RawCreateAs -in @('Team', 'Communication')) {
+                    $RawCreateAs
+                } else {
+                    'Team'
                 }
                 # language "default" (or missing) → Lcid 0 so New-CIPPSharepointSite uses tenant default.
                 # A specific language → pass that LCID. Always pass Lcid so we don't fall back to the
